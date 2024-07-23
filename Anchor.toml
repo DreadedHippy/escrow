@@ -1,0 +1,25 @@
+[toolchain]
+
+[features]
+seeds = false
+skip-lint = false
+
+[programs.localnet]
+escrow = "8VewA7Nj7CwWR23UU1goDZGsNf79a7oHq5bsrZCsmATZ"
+
+
+[programs.devnet]
+escrow = "8VewA7Nj7CwWR23UU1goDZGsNf79a7oHq5bsrZCsmATZ"
+
+[programs.mainnet]
+escrow = "8VewA7Nj7CwWR23UU1goDZGsNf79a7oHq5bsrZCsmATZ"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "Localnet"
+wallet = "/home/aizee/.config/solana/id.json"
+
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
