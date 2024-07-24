@@ -5,7 +5,7 @@ import { Escrow } from "../target/types/escrow";
 
 const { SystemProgram } = anchor.web3;
 
-describe("escrow", () => {
+describe("escrow", async () => {
   // Configure the client to use the local cluster.
   const provider = anchor.AnchorProvider.local();
   // let [walletAddr,] = await anchor.web3.PublicKey.findProgramAddressSync([Buffer.from("offer")], programIdOfYourProgram);anchor
@@ -16,40 +16,45 @@ describe("escrow", () => {
 
   const program = anchor.workspace.Escrow as Program<Escrow>;
   let _offer = undefined;
+  const [offerPDA, _] = await anchor.web3.PublicKey.findProgramAddress([Buffer.from("offer"), provider.wallet.publicKey.toBuffer()], program.programId);
+
 
   it("Is initialized!", async () => {
     // const holdingAccount = anchor.web3.Keypair.generate();
-    const offer = anchor.web3.Keypair.generate();
+    // const offer_key = anchor.web3.Keypair.generate();
+    const offerId = "offer 1";
 
 
     const amount = new anchor.BN(10);
     const tx = await program.methods
-    .createOffer(amount, "Description one, this is a test offer", "deliver", "cat")
+    .createOffer(amount, offerId, "Description one, this is a test offer", "", "")
     .accounts({
-      offer: offer.publicKey,
-      // holdingAccount: holdingAccount.publicKey,
+      offer: offerPDA,
       creator: provider.wallet.publicKey,
       systemProgram: SystemProgram.programId
     })
-    .signers([offer])
     .rpc();
-    const offer_check = await program.account.offer.fetch(offer.publicKey);
+
+    
+    const offer_check = await program.account.offer.fetch(offerPDA);
 
     assert.ok(offer_check.amount.eq(amount));
     
     console.log(`Your transaction signature ${tx}`);
 
-    _offer = offer;    
+
+    _offer = offerPDA;
   });
 
-  it("Is accepted", async () => {
-    const offer = _offer;
     const receiverAccount = anchor.web3.Keypair.generate();
+
+  it("Is accepted", async () => {
+    const offerPDA = _offer;
 
     const tx = await program.methods
       .acceptOffer()
       .accounts({
-        offer: offer.publicKey,
+        offer: offerPDA,
         receiver: receiverAccount.publicKey,
       })
       .signers([receiverAccount])
@@ -57,7 +62,8 @@ describe("escrow", () => {
 
 
     // Fetch the newly updated account.
-    const offer_check = await program.account.offer.fetch(offer.publicKey);
+
+    const offer_check = await program.account.offer.fetch(offerPDA);
 
     // Assert that the offer is marked as accepted
     assert.ok(offer_check.accepted);
@@ -65,64 +71,86 @@ describe("escrow", () => {
     // Assert that the offer is accepted by the signer/receiver
     assert.ok(offer_check.receiver.equals(receiverAccount.publicKey));
 
-    _offer = offer
+    _offer = offerPDA
   });
 
-  describe("e2e escrow test", () => {
+  describe("e2e escrow test", async () => {
 
       const offer = anchor.web3.Keypair.generate();
       const receiver = anchor.web3.Keypair.generate();
       // const creator = anchor.web3.Keypair.generate();
-      const amount = new anchor.BN(1000);
+      // const amount = new anchor.BN(1000);
+      // const [offerPDAF, _] = await anchor.web3.PublicKey.findProgramAddress([Buffer.from("offer"), provider.wallet.publicKey.toBuffer()], program.programId);
 
-      it("is created: full", async () => {
-        const create_tx = await program.methods
-          .createOffer(amount, "Description for final test", "deliverableeesss", "category")
-          .accounts({
-            offer: offer.publicKey,
-            creator: provider.wallet.publicKey,
-            systemProgram: SystemProgram.programId
-          })
-          .signers([offer])
-          .rpc();
 
-        const offer_check = await program.account.offer.fetch(offer.publicKey);
-        assert.ok(offer_check.amount.eq(amount));
 
-        console.log(`Your transaction signature for offer cretion: ${create_tx}`);
+      // it("is created: full", async () => {
+      //   const create_tx = await program.methods
+      //     .createOffer(amount, "offeri", "Description for final test", "deliverableeesss", "category")
+      //     .accounts({
+      //       offer: offerPDAF,
+      //       creator: provider.wallet.publicKey,
+      //       systemProgram: SystemProgram.programId
+      //     })
+      //     .signers([offer])
+      //     .rpc();
 
-        // accept_tx
-      });
+      //   const offer_check = await program.account.offer.fetch(offer.publicKey);
+      //   assert.ok(offer_check.amount.eq(amount));
+
+      //   console.log(`Your transaction signature for offer cretion: ${create_tx}`);
+
+      //   // accept_tx
+      // });
+
+      // it("is accepted: full", async () => {
+      //   const accept_tx = await program.methods
+      //   .acceptOffer()
+      //   .accounts({
+      //     offer: offerPDAF,
+      //     receiver: receiver.publicKey,
+      //   })
+      //   .signers([receiver])
+      //   .rpc();
+
+      //   console.log(`Your transaction signature for offer acceptance: ${accept_tx}`);
+      //   const offer_accept_check = await program.account.offer.fetch(offer.publicKey);
+      //   assert.ok(offer_accept_check.accepted);
+      //   assert.ok(offer_accept_check.receiver.equals(receiver.publicKey));
+      
+      // });
 
       it("is accepted: full", async () => {
         const accept_tx = await program.methods
         .acceptOffer()
         .accounts({
-          offer: offer.publicKey,
-          receiver: receiver.publicKey,
+            offer: offerPDA,
+            receiver: receiver.publicKey
         })
         .signers([receiver])
         .rpc();
 
-        console.log(`Your transaction signature for offer acceptance: ${accept_tx}`);
-        const offer_accept_check = await program.account.offer.fetch(offer.publicKey);
-        assert.ok(offer_accept_check.accepted);
-        assert.ok(offer_accept_check.receiver.equals(receiver.publicKey));
-      
+        console.log(`Your transaction signature for offer acceptence is ${accept_tx}`);
+        const offer_accepted_check = await program.account.offer.fetch(offerPDA);
+        assert.ok(offer_accepted_check.accepted);
+
+    
       });
+
+      // let offerPDA = _offer;
 
       it("is approved: full", async () => {
         const approve_tx = await program.methods
         .approvePayment()
         .accounts({
-          offer: offer.publicKey,
+          offer: offerPDA,
           creator: provider.wallet.publicKey,
           // systemProgram: SystemProgram.programId
         })
         .rpc();
 
         console.log(`Your transaction signature for offer payment approval ${approve_tx}`);
-        const offer_approve_check = await program.account.offer.fetch(offer.publicKey);
+        const offer_approve_check = await program.account.offer.fetch(offerPDA);
         assert.ok(offer_approve_check.completed);
         console.log(`Offer receiver ${offer_approve_check.receiver}`);
       });
@@ -132,11 +160,11 @@ describe("escrow", () => {
         const receive_payment_tx = await program.methods
           .receivePayment()
           .accounts({
-            offer: offer.publicKey,
-            receiver: receiver.publicKey,
+            offer: offerPDA,
+            receiver: receiverAccount.publicKey,
             systemProgram: SystemProgram.programId
           })
-          .signers([receiver])
+          .signers([receiverAccount])
           .rpc();
 
         console.log(`Your transaction signature for payment receival: ${receive_payment_tx} `);

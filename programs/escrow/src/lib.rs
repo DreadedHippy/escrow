@@ -15,6 +15,7 @@ pub mod escrow {
     pub fn create_offer(
         ctx: Context<CreateOffer>,
         amount: u64,
+        offer_id: String,
         description: String,
         deliverables: String,
         category: String,
@@ -32,23 +33,27 @@ pub mod escrow {
         }
         let rent_exempt_lamports = Rent::get()?.minimum_balance(Offer::LEN);
 
+        // Calculate total amount required to store the sol and be rent exempt;
+
         let creator_balance = ctx.accounts.creator.to_account_info().lamports();
 
         let total = rent_exempt_lamports + amount;
 
         if creator_balance < total {
+            // Throw error if insufficient balance
             return Err(CoreErrorCode::InsufficientFunds.into());
         }
 
+        // Initialize the offer
         let offer = &mut ctx.accounts.offer;
         offer.creator = *ctx.accounts.creator.key;
         offer.amount = amount;
         offer.accepted = false;
         offer.receiver = None;
         offer.completed = false;
-        // offer.bump = ctx.bumps.offer;
         offer.payment_received = false;
 
+        // Tranfer from the creator's account into the `Offer` PDA
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
@@ -58,24 +63,17 @@ pub mod escrow {
         );
         system_program::transfer(cpi_context, total)?;
 
-        // let ix = anchor_lang::solana_program::system_instruction::transfer(
-        //     &ctx.accounts.creator.key(),
-        //     &ctx.accounts.offer.key(),
-        //     total,
-        // );
-        // anchor_lang::solana_program::program::invoke(
-        //     &ix,
-        //     &[
-        //         ctx.accounts.creator.to_account_info(),
-        //         ctx.accounts.offer.to_account_info(),
-        //     ],
-        // )?;
-
         Ok(())
     }
 
+    /// When a `receiver` accepts to undertake an offer
     pub fn accept_offer(ctx: Context<AcceptOffer>) -> Result<()> {
         let offer = &mut ctx.accounts.offer;
+
+        msg!(
+            "Ammount inside the offer account after {}",
+            offer.to_account_info().lamports()
+        );
 
         if offer.accepted {
             return Err(CoreErrorCode::OfferAlreadyAccepted.into());
@@ -87,10 +85,10 @@ pub mod escrow {
 
         offer.accepted = true;
         offer.receiver = Some(ctx.accounts.receiver.key());
-        // offer.receiver_bump = Some(ctx.bumps.offer);
         Ok(())
     }
 
+    /// Creator of an offer approves that receiver has completed said offer
     pub fn approve_payment(ctx: Context<ApprovePayment>) -> Result<()> {
         let offer = &mut ctx.accounts.offer;
         let amount = offer.amount;
@@ -110,46 +108,10 @@ pub mod escrow {
         offer.completed = true;
 
         Ok(())
-
-        // let receiver_key = offer.receiver?;
-        // let acc_receiver = ctx.accounts.receiver.key();
-
-        // if receiver_key != acc_receiver {
-        // return Err(CoreErrorCode::ApprovalReceiverKeyNotMatchOfferReceiverKey.into());
-        // }
-
-        // let creator = &ctx.accounts.creator;
-        // let receiver_account = &ctx.accounts.receiver;
-
-        // system_program::transfer(
-        //     CpiContext::new(
-        //         ctx.accounts.system_program.to_account_info(),
-        //         system_program::Transfer {
-        //             from: ctx.accounts.holding_account.to_account_info(),
-        //             to: ctx.accounts.receiver.to_account_info(),
-        //         },
-        //     ),
-        //     offer.amount,
-        // )?;
-
-        // let ix = anchor_lang::solana_program::system_instruction::transfer(
-        //     &ctx.accounts.holding_account.key(),
-        //     &ctx.accounts.receiver.key(),
-        //     amount,
-        // );
-        // anchor_lang::solana_program::program::invoke(
-        //     &ix,
-        //     &[
-        //         ctx.accounts.holding_account.to_account_info(),
-        //         ctx.accounts.receiver.to_account_info(),
-        //     ],
-        // )?;
-
-        // offer.completed = true;
-
-        // Ok(())
     }
 
+    // Here is where the issue lies
+    /// Receiver wants to receive payment into their wallet
     pub fn receive_payment(ctx: Context<ReceivePayment>) -> Result<()> {
         // let offer = &mut ctx.acccounts.offer;
 
@@ -170,46 +132,19 @@ pub mod escrow {
 
         system_program::transfer(cpi_context, amount)?;
 
-        // let ix = anchor_lang::solana_program::system_instruction::transfer(
-        //     &ctx.accounts.offer.key(),
-        //     &ctx.accounts.receiver.key(),
-        //     amount,
-        // );
-        // anchor_lang::solana_program::program::invoke(
-        //     &ix,
-        //     &[
-        //         ctx.accounts.offer.to_account_info(),
-        //         ctx.accounts.receiver.to_account_info(),
-        //     ],
-        // )?;
-
         ctx.accounts.offer.payment_received = true;
 
         Ok(())
     }
-
-    // pub fn get_offer(ctx: Context<GetOffer>) -> Result<Offer> {
-    //     Ok(Offer {
-    //         creator: ctx.accounts.offer.creator.clone(),
-    //         receiver: ctx.accounts.offer.receiver.clone(),
-    //         amount: ctx.accounts.offer.amount.clone(),
-    //         accepted: ctx.accounts.offer.accepted.clone(),
-    //         completed: ctx.accounts.offer.completed.clone(),
-    //         deliverables: ctx.accounts.offer.desription.clone(),
-    //         category: ctx.accounts.offer.category.clone(),
-    //         desription: ctx.accounts.offer.desription.clone(),
-    //     })
-    // }
 }
 
 #[derive(Accounts)]
+// #[instruction(amount: u8, offer_id: String, description: String, deliverables: String, category: String)]
 pub struct CreateOffer<'info> {
-    #[account(init, payer = creator, space = Offer::LEN)]
+    #[account(init, payer = creator, space = Offer::LEN, seeds = [b"offer", creator.key().as_ref()], bump)]
     pub offer: Account<'info, Offer>,
     #[account(mut)]
     pub creator: Signer<'info>,
-    // #[account(init, payer = creator, space = HoldingAccount::LEN)]
-    // pub holding_account: Account<'info, HoldingAccount>,
     pub system_program: Program<'info, System>,
 }
 
@@ -235,7 +170,6 @@ pub struct ReceivePayment<'info> {
         constraint = offer.accepted == true,
         constraint = offer.completed == true
     )]
-    // #[account(mut)]
     pub offer: Account<'info, Offer>,
     #[account(mut)]
     pub receiver: Signer<'info>,
@@ -244,15 +178,10 @@ pub struct ReceivePayment<'info> {
 
 #[derive(Accounts)]
 pub struct ApprovePayment<'info> {
-    // #[account(mut seeds = [b"offer", creator.key().as_ref()], bump = offer.bump)]
     #[account(mut, constraint = offer.creator == creator.key())]
     pub offer: Account<'info, Offer>,
     #[account(mut)]
     pub creator: Signer<'info>,
-    // #[account(mut)]
-    // pub receiver: SystemAccount<'info>,
-    // #[account(mut)]
-    // pub holding_account: Account<'info, HoldingAccount>,
     pub system_program: Program<'info, System>,
 }
 
@@ -266,8 +195,6 @@ pub struct Offer {
     pub deliverables: String,
     pub category: String,
     pub desription: String,
-    // pub bump: u8,
-    // pub receiver_bump: Option<u8>,
     pub payment_received: bool,
 }
 
@@ -281,8 +208,7 @@ const MAX_DELIVERABLES_LENGTH: usize = 50 * 4;
 const MAX_CATEGORY_LENGTH: usize = 50 * 4;
 const MAX_DESCRIPTION_LENGTH: usize = 240 * 4;
 const BUMP_LENGTH: usize = 1;
-const RECEIVER_BUMP_LENGTH: usize = 1 + 1;
-const RECEIVED_LENGTH: usize = 1;
+const PAYMENT_RECEIVED_LENGTH: usize = 1;
 
 impl Offer {
     const LEN: usize = DISCRIMINATOR_LENGTH
@@ -295,8 +221,7 @@ impl Offer {
         + MAX_CATEGORY_LENGTH
         + MAX_DESCRIPTION_LENGTH
         + BUMP_LENGTH
-        + RECEIVER_BUMP_LENGTH
-        + RECEIVED_LENGTH;
+        + PAYMENT_RECEIVED_LENGTH;
 }
 
 #[account]
@@ -342,18 +267,3 @@ pub enum CoreErrorCode {
     #[msg("Only approved receiver can receive payment")]
     OnlyApprovedReceiverCanReceivePayment,
 }
-
-// fn transfer () {
-//     let ix = anchor_lang::solana_program::system_instruction::transfer(
-//         &ctx.accounts.from.key(),
-//         &ctx.accounts.to.key(),
-//         amount,
-//     );
-//     anchor_lang::solana_program::program::invoke(
-//         &ix,
-//         &[
-//             ctx.accounts.from.to_account_info(),
-//             ctx.accounts.to.to_account_info(),
-//         ],
-//     );
-// }
