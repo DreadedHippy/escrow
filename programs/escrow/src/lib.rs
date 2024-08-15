@@ -13,10 +13,30 @@ pub mod escrow {
     use super::CoreErrorCode;
     use super::*;
 
-    pub fn create_offer(ctx: Context<CreateOffer>, amount: u64, offer_id: String) -> Result<()> {
+    pub fn create_offer(
+        ctx: Context<CreateOffer>,
+        amount: u64,
+        offer_id: String,
+        deliverables: String,
+        category: String,
+        description: String,
+    ) -> Result<()> {
         if offer_id.chars().count() > 50 {
             return Err(CoreErrorCode::OfferIdTooLong.into());
         }
+
+        if deliverables.chars().count() > 50 {
+            return Err(CoreErrorCode::DeliverablesTooLong.into());
+        }
+
+        if category.chars().count() > 50 {
+            return Err(CoreErrorCode::CategoryTooLong.into());
+        }
+
+        if description.chars().count() > 240 {
+            return Err(CoreErrorCode::DescriptionTooLong.into());
+        }
+
         let offer = &mut ctx.accounts.offer;
         offer.creator = *ctx.accounts.creator.key;
         offer.amount = amount;
@@ -26,6 +46,9 @@ pub mod escrow {
         offer.withdrawn = false;
         offer.id = offer_id;
         offer.bump = ctx.bumps.offer;
+        offer.deliverables = deliverables;
+        offer.category = category;
+        offer.description = description;
 
         // Before (Not working)
         // ctx.accounts.creator.sub_lamports(amount)?;
@@ -52,13 +75,6 @@ pub mod escrow {
 
         let offer = &mut ctx.accounts.offer;
 
-        if offer.accepted {
-            return Err(CoreErrorCode::OfferAlreadyAccepted.into());
-        }
-
-        if offer.completed {
-            return Err(CoreErrorCode::OfferAlreadyCompleted.into());
-        }
         // update offer
         offer.accepted = true;
         offer.receiver = Some(receiver_key);
@@ -68,14 +84,6 @@ pub mod escrow {
 
     pub fn approve_offer_completion(ctx: Context<ApproveOfferCompletion>) -> Result<()> {
         let offer = &mut ctx.accounts.offer;
-
-        if offer.creator != ctx.accounts.creator.key() {
-            return Err(CoreErrorCode::OnlyOfferCreatorCanApproveOffer.into());
-        }
-
-        if offer.completed == true {
-            return Err(CoreErrorCode::OfferAlreadyApproved.into());
-        }
 
         offer.completed = true;
 
@@ -97,7 +105,7 @@ pub mod escrow {
 }
 
 #[derive(Accounts)]
-#[instruction(amount: u64, offer_id: String)]
+#[instruction(amount: u64, offer_id: String, deliverables: String, category: String, description: String)]
 // #[instruction(amount: u8, offer_id: String, description: String, deliverables: String, category: String)]
 pub struct CreateOffer<'info> {
     #[account(
@@ -118,8 +126,8 @@ pub struct AcceptOffer<'info> {
     #[account(
         mut,
         constraint = offer.accepted == false @ CoreErrorCode::OfferAlreadyAccepted,
-        constraint = offer.receiver == None,
-        constraint = offer.completed == false
+        constraint = offer.receiver == None @ CoreErrorCode::OfferAlreadyAccepted,
+        constraint = offer.completed == false @ CoreErrorCode::OfferAlreadyApprovedAsCompleted
     )]
     pub offer: Account<'info, Offer>,
     pub receiver: Signer<'info>,
@@ -130,8 +138,8 @@ pub struct AcceptOffer<'info> {
 pub struct ApproveOfferCompletion<'info> {
     #[account(
         mut,
-        constraint = offer.creator == *creator.key,
-        constraint = offer.completed == false
+        constraint = offer.creator == *creator.key @ CoreErrorCode::OnlyOfferCreatorCanApproveOffer,
+        constraint = offer.completed == false @ CoreErrorCode::OfferAlreadyApprovedAsCompleted
     )]
     pub offer: Account<'info, Offer>,
     pub creator: Signer<'info>,
@@ -142,9 +150,9 @@ pub struct ApproveOfferCompletion<'info> {
 pub struct WithdrawOffer<'info> {
     #[account(
         mut,
-        constraint = offer.completed == true,
-        constraint = offer.receiver == Some(*receiver.key),
-        constraint = offer.withdrawn == false
+        constraint = offer.completed == true @ CoreErrorCode::OfferNotCompleted,
+        constraint = offer.receiver == Some(*receiver.key) @ CoreErrorCode::OnlyApprovedReceiverCanReceivePayment,
+        constraint = offer.withdrawn == false @ CoreErrorCode::OfferAlreadyWithdrawn
     )]
     pub offer: Account<'info, Offer>,
     #[account(mut)]
@@ -162,6 +170,9 @@ pub struct Offer {
     pub withdrawn: bool,
     pub id: String,
     pub bump: u8,
+    pub deliverables: String,
+    pub category: String,
+    pub description: String,
 }
 
 const DISCRIMINATOR_LENGTH: usize = 8;
@@ -173,9 +184,9 @@ const COMPLETED_LENGTH: usize = 1;
 const WITHDRAWN_LENGTH: usize = 1;
 const MAX_ID_LENGTH: usize = 50 * 4;
 const BUMP_LENGTH: usize = 1;
-// const MAX_DELIVERABLES_LENGTH: usize = 50 * 4;
-// const MAX_CATEGORY_LENGTH: usize = 50 * 4;
-// const MAX_DESCRIPTION_LENGTH: usize = 240 * 4;
+const MAX_DELIVERABLES_LENGTH: usize = 50 * 4;
+const MAX_CATEGORY_LENGTH: usize = 50 * 4;
+const MAX_DESCRIPTION_LENGTH: usize = 240 * 4;
 
 impl Offer {
     const LEN: usize = DISCRIMINATOR_LENGTH
@@ -186,15 +197,17 @@ impl Offer {
         + COMPLETED_LENGTH
         + WITHDRAWN_LENGTH
         + MAX_ID_LENGTH
-        + BUMP_LENGTH;
-    // + MAX_DELIVERABLES_LENGTH
-    // + MAX_CATEGORY_LENGTH
-    // + MAX_DESCRIPTION_LENGTH;
+        + BUMP_LENGTH
+        + MAX_DELIVERABLES_LENGTH
+        + MAX_CATEGORY_LENGTH
+        + MAX_DESCRIPTION_LENGTH;
 }
 #[error_code]
 pub enum CoreErrorCode {
     #[msg("The offer has not been accepted yet.")]
     OfferNotAccepted,
+    #[msg("The completion of the offer has not yet been approved by its creator")]
+    OfferNotCompleted,
     #[msg("Category must not exceed 50 characters")]
     CategoryTooLong,
     #[msg("Description must not exceed 240 characters")]
@@ -205,20 +218,20 @@ pub enum CoreErrorCode {
     InsufficientFunds,
     #[msg("Offer already accepted")]
     OfferAlreadyAccepted,
-    #[msg("Offer already completed")]
-    OfferAlreadyCompleted,
-    #[msg("Offer already approved")]
-    OfferAlreadyApproved,
+    #[msg("Offer already approved as completed")]
+    OfferAlreadyApprovedAsCompleted,
     #[msg("No receiver attached to offer")]
     NoReceiverAttached,
     #[msg("No receiver key attached to offer")]
     NoReceiverKeyAttached,
     #[msg("Approval receiver key does not match offer receiver key")]
-    ApprovalReceiverKeyNotMatchOfferReceiverKey,
+    OfferWithdrawalKeyNotMatchOfferReceiverKey,
     #[msg("Only the creator of an offer can approve the offer")]
     OnlyOfferCreatorCanApproveOffer,
     #[msg("Only approved receiver can receive payment")]
     OnlyApprovedReceiverCanReceivePayment,
     #[msg("Offer id must not exceed 50 characters")]
     OfferIdTooLong,
+    #[msg("The reward for this offer has already been claimed")]
+    OfferAlreadyWithdrawn,
 }

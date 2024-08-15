@@ -1,5 +1,5 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
+import { AnchorError, Program } from "@coral-xyz/anchor";
 import { assert } from "chai";
 import { Escrow } from "../target/types/escrow";
 
@@ -33,7 +33,7 @@ describe("escrow", async () => {
   const receiver = anchor.web3.Keypair.generate();
 
   // Generate a new keypair to create accounts owned by our program
-  const programOwnedAccount = anchor.web3.Keypair.generate();
+  const tester = anchor.web3.Keypair.generate();
 
   const offerAmount = 100 * LAMPORTS_PER_SOL;
 
@@ -44,6 +44,9 @@ describe("escrow", async () => {
     console.log("---------Creating an offer...-------");
     await airdropSol(creator.publicKey, (1e9)* 1000); // 1000 sol
     const offerId = "offer1";
+    const description = "description";
+    const deliverables = "delivearbles";
+    const category = "category"
     const[offerPDA, _] = anchor.web3.PublicKey.findProgramAddressSync([Buffer.from("offer"), creator.publicKey.toBuffer(), Buffer.from(offerId)], program.programId);
 
     
@@ -51,7 +54,7 @@ describe("escrow", async () => {
 
     let amount = new anchor.BN(offerAmount);
     
-    await program.methods.createOffer(amount, offerId)
+    await program.methods.createOffer(amount, offerId, deliverables, category, description)
     .accounts({
       creator: creator.publicKey,
       offer: offerPDA
@@ -84,10 +87,56 @@ describe("escrow", async () => {
 
 
     const offer_check = await program.account.offer.fetch(offerPDA);
-    assert.ok(offer_check.accepted);
+    assert.isTrue(offer_check.accepted);
     assert.ok(offer_check.receiver.equals(receiver.publicKey));
-    
   })
+
+   
+  it("Fails to accept an already accepted offer", async () => {
+    const offerId = "offer1";
+    const[offerPDA, _] = anchor.web3.PublicKey.findProgramAddressSync([Buffer.from("offer"), creator.publicKey.toBuffer(), Buffer.from(offerId)], program.programId);
+      
+    try {
+
+      await program.methods.acceptOffer()
+      .accounts({
+        offer: offerPDA,
+        receiver: receiver.publicKey
+      })
+      .signers([receiver])
+      .rpc();
+      
+    } catch(_err) {
+      assert.isTrue(_err instanceof AnchorError);
+      const err: AnchorError = _err;
+      const errMsg = "Offer already accepted";
+      assert.strictEqual(err.error.errorMessage, errMsg);
+    }
+  });
+
+  it("Fails to approve an offer given the wrong creator", async () => {
+    try {
+      
+      const offerId = "offer1";
+      const[offerPDA, _] = anchor.web3.PublicKey.findProgramAddressSync([Buffer.from("offer"), creator.publicKey.toBuffer(), Buffer.from(offerId)], program.programId);
+
+      await program.methods.approveOfferCompletion()
+      .accounts({
+        creator: tester.publicKey, // invalid creatoer
+        offer: offerPDA
+      })
+      .signers([tester]) // invalid creatoe
+      .rpc();
+    } catch(_err) {
+      assert.isTrue(_err instanceof AnchorError);
+
+      const err: AnchorError = _err;
+      const errMsg = "Only the creator of an offer can approve the offer";
+
+      assert.strictEqual(err.error.errorMessage, errMsg);
+    }
+  })
+
 
   it("Approves an offer", async () => {
     console.log("--------Approving offer...-------------");
@@ -106,6 +155,52 @@ describe("escrow", async () => {
     
     const offer_check = await program.account.offer.fetch(offerPDA);
     assert.ok(offer_check.completed);    
+  })
+
+  it ("Fails to approve an already approved offer", async () => {
+    try {
+      
+      const offerId = "offer1";
+      const[offerPDA, _] = anchor.web3.PublicKey.findProgramAddressSync([Buffer.from("offer"), creator.publicKey.toBuffer(), Buffer.from(offerId)], program.programId);
+
+      await program.methods.approveOfferCompletion()
+      .accounts({
+        creator: creator.publicKey,
+        offer: offerPDA
+      })
+      .signers([creator])
+      .rpc();
+
+    
+    } catch(_err) {
+      assert.isTrue(_err instanceof AnchorError);
+      const err: AnchorError = _err;
+      const errMsg = "Offer already approved as completed";
+      assert.strictEqual(err.error.errorMessage, errMsg);
+    }
+  })
+
+  it("Fails to withdraw offer reward given the wrong receiver", async() => {
+    try {
+      
+      const offerId = "offer1";
+      const[offerPDA, _] = anchor.web3.PublicKey.findProgramAddressSync([Buffer.from("offer"), creator.publicKey.toBuffer(), Buffer.from(offerId)], program.programId);
+    
+      await program.methods.withdrawOffer()
+      .accounts({
+        receiver: tester.publicKey,
+        offer: offerPDA
+      })
+      .signers([tester])
+      .rpc();
+    
+    } catch(_err) {
+      assert.isTrue(_err instanceof AnchorError);
+
+      const err: AnchorError = _err;
+      const errMsg = "Only approved receiver can receive payment";
+      assert.strictEqual(err.error.errorMessage, errMsg);
+    }
   })
 
 
@@ -132,6 +227,30 @@ describe("escrow", async () => {
 
 
     await getBalances(offerPDA, receiver.publicKey, "After offer withdrawn");
+  })
+
+  it("Fails to withdraw reward from an already withdrawn offer", async() => {
+    try {
+      
+      const offerId = "offer1";
+      const[offerPDA, _] = anchor.web3.PublicKey.findProgramAddressSync([Buffer.from("offer"), creator.publicKey.toBuffer(), Buffer.from(offerId)], program.programId);
+    
+      await program.methods.withdrawOffer()
+      .accounts({
+        receiver: receiver.publicKey,
+        offer: offerPDA
+      })
+      .signers([receiver])
+      .rpc();
+    
+      const offer_check = await program.account.offer.fetch(offerPDA);
+      assert.ok(offer_check.withdrawn);
+    } catch(_err) {
+      assert.isTrue(_err instanceof AnchorError);
+      const err: AnchorError = _err;
+      const errMsg = "The reward for this offer has already been claimed";
+      assert.strictEqual(err.error.errorMessage, errMsg);
+    }
   })
 
 
