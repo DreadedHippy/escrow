@@ -1,6 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { AnchorError, Program } from "@coral-xyz/anchor";
 import { assert } from "chai";
+import createStatsCollector from "mocha/lib/stats-collector";
 import { Escrow } from "../target/types/escrow";
 
 const { SystemProgram } = anchor.web3;
@@ -70,6 +71,29 @@ describe("escrow", async () => {
     const offer_check = await program.account.offer.fetch(offerPDA);
     assert.ok(offer_check.amount.eq(amount));
   });
+
+  it("Fails to accept offer as the offer creator", async () => {
+    try {
+      
+      const offerId = "offer1";
+      const[offerPDA, _] = anchor.web3.PublicKey.findProgramAddressSync([Buffer.from("offer"), creator.publicKey.toBuffer(), Buffer.from(offerId)], program.programId);
+
+      await program.methods.acceptOffer()
+        .accounts({
+        offer: offerPDA,
+        receiver: creator.publicKey
+      })
+      .signers([creator])
+      .rpc();
+      
+    } catch(_err) {
+      assert.isTrue(_err instanceof AnchorError);
+      const err: AnchorError = _err;
+      const errMsg = "Offer cannot be accepted by its creator";
+
+      assert.strictEqual(err.error.errorMessage, errMsg);
+    }
+  })
 
   it ("Accepts an offer", async () => {
     console.log("---------Accepting an offer...-------");

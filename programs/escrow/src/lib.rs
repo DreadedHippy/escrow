@@ -125,6 +125,7 @@ pub struct CreateOffer<'info> {
 pub struct AcceptOffer<'info> {
     #[account(
         mut,
+        constraint = offer.creator != *receiver.key @ CoreErrorCode::OfferCreatorCannotAcceptOffer,
         constraint = offer.accepted == false @ CoreErrorCode::OfferAlreadyAccepted,
         constraint = offer.receiver == None @ CoreErrorCode::OfferAlreadyAccepted,
         constraint = offer.completed == false @ CoreErrorCode::OfferAlreadyApprovedAsCompleted
@@ -234,4 +235,6 @@ pub enum CoreErrorCode {
     OfferIdTooLong,
     #[msg("The reward for this offer has already been claimed")]
     OfferAlreadyWithdrawn,
+    #[msg("Offer cannot be accepted by its creator")]
+    OfferCreatorCannotAcceptOffer,
 }
