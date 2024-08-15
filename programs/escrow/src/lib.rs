@@ -25,6 +25,7 @@ pub mod escrow {
         offer.completed = false;
         offer.withdrawn = false;
         offer.id = offer_id;
+        offer.bump = ctx.bumps.offer;
 
         // Before (Not working)
         // ctx.accounts.creator.sub_lamports(amount)?;
@@ -116,7 +117,7 @@ pub struct CreateOffer<'info> {
 pub struct AcceptOffer<'info> {
     #[account(
         mut,
-        constraint = offer.accepted == false,
+        constraint = offer.accepted == false @ CoreErrorCode::OfferAlreadyAccepted,
         constraint = offer.receiver == None,
         constraint = offer.completed == false
     )]
@@ -160,6 +161,7 @@ pub struct Offer {
     pub completed: bool,
     pub withdrawn: bool,
     pub id: String,
+    pub bump: u8,
 }
 
 const DISCRIMINATOR_LENGTH: usize = 8;
@@ -170,6 +172,7 @@ const ACCEPTED_LENGTH: usize = 1;
 const COMPLETED_LENGTH: usize = 1;
 const WITHDRAWN_LENGTH: usize = 1;
 const MAX_ID_LENGTH: usize = 50 * 4;
+const BUMP_LENGTH: usize = 1;
 // const MAX_DELIVERABLES_LENGTH: usize = 50 * 4;
 // const MAX_CATEGORY_LENGTH: usize = 50 * 4;
 // const MAX_DESCRIPTION_LENGTH: usize = 240 * 4;
@@ -182,7 +185,8 @@ impl Offer {
         + ACCEPTED_LENGTH
         + COMPLETED_LENGTH
         + WITHDRAWN_LENGTH
-        + MAX_ID_LENGTH;
+        + MAX_ID_LENGTH
+        + BUMP_LENGTH;
     // + MAX_DELIVERABLES_LENGTH
     // + MAX_CATEGORY_LENGTH
     // + MAX_DESCRIPTION_LENGTH;
